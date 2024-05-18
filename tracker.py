@@ -20,7 +20,7 @@
 # 1. A 1 minute moving average of participants’ age per nationality, computed for each 10 seconds
 # ○ For a given nationality, consider all the groups in which at least one participant is of that nationality
 # 2. Percentage increase (with respect to the day before) of the 1 minute moving average, for each 10 seconds
-# 3. Top nationalities with the highest percentage increase of the 1 minute moving average, for each day
+# 3. Top nationalities with the highest percentage increase of the 1 minute moving average, for each 10 seconds
 ####################
 
 ###### INPUT ######
@@ -45,6 +45,7 @@ CONFIG = {
     "windowDuration": "1 minute",
     "slideDuration": "10 seconds",
     "watermarkDuration": "5 seconds",
+    "output_format": "parquet",
 }
 
 
@@ -109,9 +110,7 @@ averaged_data = parsed_data.groupBy(
     "nationality"
 ).avg("age") #.orderBy("window", "nationality") # sort by window and nationality for better visualization in console
 
-#averaged_data = averaged_data.withColumn("window_start", to_timestamp("window.start")).withColumn("window_end", to_timestamp("window.end"))
-
-# Join to calculate percentage increase without sorting
+# join to calculate percentage increase without sorting
 percentage_increase = averaged_data.alias("today").join(
     averaged_data.alias("yesterday"),
     (col("today.window.start") == col("yesterday.window.end")) & 
@@ -129,29 +128,19 @@ percentage_increase = percentage_increase.select(
     ((col("today.avg(age)") - col("yesterday.avg(age)")) / col("yesterday.avg(age)") * 100).alias("percentage_increase")
 )
 
-# Define the streaming query, using append mode without sorting
-query = percentage_increase.writeStream \
-    .outputMode("append") \
-    .format("console") \
-    .option("truncate", False) \
-    .start()
+if CONFIG["output_format"] == "console": # print to console
+    query = percentage_increase.writeStream \
+        .outputMode("append") \
+        .format("console") \
+        .option("truncate", False) \
+        .start()
+elif CONFIG["output_format"] == "parquet": # store files locally => use this for top_n.py
+    query = percentage_increase.writeStream \
+        .outputMode("append") \
+        .format("parquet") \
+        .option("path", "output/percentage_increase") \
+        .option("checkpointLocation", "checkpoint/percentage_increase") \
+        .start()
 
 query.awaitTermination()
 
-
-
-
-
-
-##### OLD CODE #####
-# 2. Percentage increase (with respect to the day before) of the 1 minute moving average, for each 10 seconds
-# AnalysisException: Join between two streaming DataFrames/Datasets is not supported in Complete output mode, only in Append output mode;
-# WORKS
-# percentage_increase = averaged_data.join(
-#     averaged_data.withColumnRenamed("avg(age)", "avg_age_yesterday").withColumnRenamed("window", "window_yesterday"),
-#     col("window.start") == col("window_yesterday.end") \
-#     ).withColumn("percentage_increase", (col("avg(age)") - col("avg_age_yesterday")) / col("avg_age_yesterday") * 100)
-
-# truncate: false => show full column data
-#query = percentage_increase.writeStream.outputMode("append").format("console").option("truncate", False).start()
-#query = averaged_data.writeStream.format("csv").option("checkpointLocation", "/Users/dre/Dev/iot-group-tracker-spark/").option("path", "/Users/dre/Dev/iot-group-tracker-spark/").start()
