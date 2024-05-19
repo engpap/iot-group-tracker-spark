@@ -32,115 +32,88 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import explode
 from pyspark.sql.functions import split
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType
 from pyspark.sql.functions import col, window, avg, to_timestamp
 
-# CONFIG = {
-#     "windowDuration": "1 week",
-#     "slideDuration": "1 day",
-#     "watermarkDuration": "1 day",
-# }
 
-CONFIG = {
-    "windowDuration": "1 minute",
-    "slideDuration": "10 seconds",
-    "watermarkDuration": "5 seconds",
-    "output_format": "parquet",
-}
+class Tracker:
+    @staticmethod
+    def run(config):
+        spark = SparkSession.builder.appName("IoT Tracker Group").getOrCreate()
 
+        # set log level to ERROR to avoid unnecessary logs
+        spark.sparkContext.setLogLevel("ERROR")
 
-spark = SparkSession.builder.appName("IoT Tracker Group").getOrCreate()
+        #  schema of the JSON data
+        participant_schema = StructType([
+            StructField("device_id", IntegerType(), True),
+            StructField("nationality", StringType(), True),
+            StructField("age", IntegerType(), True)
+        ])
+        json_schema = StructType([
+            StructField("timestamp", StringType(), True),  # Assuming timestamp is a string in the JSON file
+            StructField("participants", ArrayType(participant_schema), True)
+        ])
 
-# set log level to ERROR to avoid unnecessary logs
-spark.sparkContext.setLogLevel("ERROR")
+        # read the JSON files as a stream
+        json_stream = spark.readStream \
+            .schema(json_schema) \
+            .json("/Users/dre/Dev/iot-group-tracker-spark/input_data")
 
-# df representing the stream of input lines from connection to localhost:9999
-input = spark.readStream.format("socket").option("host", "localhost").option("port", 9999).load()
-print("(DEBUG) input: ", input)
+        # explode the participants array to get one row per participant
+        exploded_stream = json_stream.select("timestamp", explode("participants").alias("participant"))
 
-device_schema = StructType([
-    StructField("timestamp", StringType(), True),
-    StructField("action", StringType(), True),
-    StructField("group_id", StringType(), True),
-    StructField("device_id", StringType(), True),
-    StructField("nationality", StringType(), True),
-    StructField("age", IntegerType(), True),
-])
+        processed_stream = exploded_stream.select(
+            to_timestamp("timestamp").alias("timestamp"),
+            col("participant.device_id").alias("device_id"),
+            col("participant.nationality").alias("nationality"),
+            col("participant.age").alias("age")
+        )
 
-# Assuming data is received as a comma-separated string
-# examples:
-# "2021-01-01 00:00:00,add,1,1,US,25"
-# "2021-01-01 00:00:00,remove,1,2,US,30"
-def parse_data(data_str):
-    fields = split(data_str, ",")
-    return {
-        "timestamp": fields[0],
-        "action": fields[1],
-        "group_id": fields[2],
-        "device_id": fields[3],
-        "nationality": fields[4],
-        "age": fields[5].cast("integer"),
-    }
+        # # Append output mode not supported when there are streaming aggregations on streaming DataFrames/DataSets without watermark;
+        # # WATERMARK tells the stream processing system how long to wait for late data before considering a window closed.
+        # # For instance, if the watermark is set to 5 minutes, the system will wait an additional 5 minutes past the end of a window 
+        # # before finalizing the computations for that window.
+        # # This allows data that arrives slightly late (up to 5 minutes late in this example) to be included in the analysis.
+        processed_stream = processed_stream.withWatermark("timestamp", config["watermarkDuration"])
+        # 1. 7 days moving age average of participants for each nationality, computed for each day
+        # Sorting is not supported on streaming DataFrames/Datasets, unless it is on aggregated DataFrame/Dataset in Complete output mode; ==> NO ORDER BY
+        # Don't use alias, does not work
+        averaged_data = processed_stream.groupBy(
+            window("timestamp", config["windowDuration"], config["slideDuration"]),
+            "nationality"
+        ).avg("age") #.orderBy("window", "nationality") # sort by window and nationality for better visualization in console
 
-# explode takes an array as input and produces a new row for each element in the array
-# alias is used to rename the column
+        # join to calculate percentage increase without sorting
+        percentage_increase = averaged_data.alias("today").join(
+            averaged_data.alias("yesterday"),
+            (col("today.window.start") == col("yesterday.window.end")) & 
+            (col("today.nationality") == col("yesterday.nationality"))
+        )
 
-parsed_data = input.select(explode(split(input.value, "\n")).alias("data")) \
-    .select(split(col("data"), ",").alias("data")).select(
-    col("data").getItem(0).cast("timestamp").alias("timestamp"),
-    col("data").getItem(1).alias("action"),
-    col("data").getItem(2).alias("group_id"),
-    col("data").getItem(3).alias("device_id"),
-    col("data").getItem(4).alias("nationality"),
-    col("data").getItem(5).cast("integer").alias("age"),
-)
+        percentage_increase = percentage_increase.select(
+            col("today.nationality"),
+            col("yesterday.window.start").alias("prev_start_time"),
+            col("yesterday.window.end").alias("prev_end_time"),
+            col("yesterday.avg(age)").alias("prev_avg_age"),
+            col("today.window.start").alias("start_time"),
+            col("today.window.end").alias("end_time"),
+            col("today.avg(age)").alias("avg_age"),
+            ((col("today.avg(age)") - col("yesterday.avg(age)")) / col("yesterday.avg(age)") * 100).alias("percentage_increase")
+        )
 
-# Append output mode not supported when there are streaming aggregations on streaming DataFrames/DataSets without watermark;
-# WATERMARK tells the stream processing system how long to wait for late data before considering a window closed.
-# For instance, if the watermark is set to 5 minutes, the system will wait an additional 5 minutes past the end of a window 
-# before finalizing the computations for that window.
-# This allows data that arrives slightly late (up to 5 minutes late in this example) to be included in the analysis.
-parsed_data = parsed_data.withWatermark("timestamp", CONFIG["watermarkDuration"])
+        if config["output_format"] == "console": # print to console
+            query = percentage_increase.writeStream \
+                .outputMode("append") \
+                .format("console") \
+                .option("truncate", False) \
+                .start()
+        elif config["output_format"] == "parquet": # store files locally => use this for top_n.py
+            query = percentage_increase.writeStream \
+                .outputMode("append") \
+                .format("parquet") \
+                .option("path", "output/percentage_increase") \
+                .option("checkpointLocation", "checkpoint/percentage_increase") \
+                .start()
 
-# 1. 7 days moving age average of participants for each nationality, computed for each day
-# Sorting is not supported on streaming DataFrames/Datasets, unless it is on aggregated DataFrame/Dataset in Complete output mode; ==> NO ORDER BY
-# Don't use alias, does not work
-averaged_data = parsed_data.groupBy(
-    window("timestamp", CONFIG["windowDuration"], CONFIG["slideDuration"]),
-    "nationality"
-).avg("age") #.orderBy("window", "nationality") # sort by window and nationality for better visualization in console
-
-# join to calculate percentage increase without sorting
-percentage_increase = averaged_data.alias("today").join(
-    averaged_data.alias("yesterday"),
-    (col("today.window.start") == col("yesterday.window.end")) & 
-    (col("today.nationality") == col("yesterday.nationality"))
-)
-
-percentage_increase = percentage_increase.select(
-    col("today.nationality"),
-    col("yesterday.window.start").alias("prev_start_time"),
-    col("yesterday.window.end").alias("prev_end_time"),
-    col("yesterday.avg(age)").alias("prev_avg_age"),
-    col("today.window.start").alias("start_time"),
-    col("today.window.end").alias("end_time"),
-    col("today.avg(age)").alias("avg_age"),
-    ((col("today.avg(age)") - col("yesterday.avg(age)")) / col("yesterday.avg(age)") * 100).alias("percentage_increase")
-)
-
-if CONFIG["output_format"] == "console": # print to console
-    query = percentage_increase.writeStream \
-        .outputMode("append") \
-        .format("console") \
-        .option("truncate", False) \
-        .start()
-elif CONFIG["output_format"] == "parquet": # store files locally => use this for top_n.py
-    query = percentage_increase.writeStream \
-        .outputMode("append") \
-        .format("parquet") \
-        .option("path", "output/percentage_increase") \
-        .option("checkpointLocation", "checkpoint/percentage_increase") \
-        .start()
-
-query.awaitTermination()
-
+        query.awaitTermination()

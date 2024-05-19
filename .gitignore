@@ -2,3 +2,6 @@
 /_spark_metadata
 /output
 /spark-warehouse
+.env
+/input_data
+/__pycache__
