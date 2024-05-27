@@ -31,7 +31,8 @@ def generate_json():
 
 def send_data():
     server_url = os.getenv('SERVER_URL')
-    headers = {'Content-Type': 'application/json'} # otherwise server returns 403
+    print("🔵 DEBUG: Server URL: ", server_url)
+    headers = {'Content-Type': 'application/json'} # otherwise server returns 415 error
     while True:
         data = generate_json()
         msg = json.dumps(data)
