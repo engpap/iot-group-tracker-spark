@@ -31,12 +31,13 @@ def generate_json():
 
 def send_data():
     server_url = os.getenv('SERVER_URL')
+    headers = {'Content-Type': 'application/json'} # otherwise server returns 403
     while True:
         data = generate_json()
         msg = json.dumps(data)
         print(f"Sending: {msg.strip()}\n")
-        response = requests.post(server_url, json=data)
-        
+        response = requests.post(server_url, headers=headers, data=msg)
+
         if response.status_code == 200:
             print(f"Server Response: {response.json()}\n")
         else:
