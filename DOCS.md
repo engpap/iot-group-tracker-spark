@@ -10,3 +10,4 @@ A batch is printed out every time a packet is received from the socket.
 
 Notes:
 - 🔵 DEBUG: Error running TrackerTopN: [NON_TIME_WINDOW_NOT_SUPPORTED_IN_STREAMING] Window function is not supported in RANK(PERCENTAGE_INCREASE#115) (as column `rank`) on streaming DataFrames/Datasets. Structured Streaming only supports time-window aggregation using the WINDOW function. (window specification: (PARTITION BY END_TIME ORDER BY PERCENTAGE_INCREASE DESC NULLS LAST ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW))
+- Saving output of queries in csv format is not good because it stores only one row per file. It's better to use console format, capture it and store it in a file.

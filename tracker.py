@@ -115,5 +115,14 @@ class Tracker:
                 .option("path", "output/percentage_increase") \
                 .option("checkpointLocation", "checkpoint/percentage_increase") \
                 .start()
+        elif config["output_format"] == "csv": # not recommended
+            query = percentage_increase.writeStream \
+                .outputMode("append") \
+                .format("csv") \
+                .option("path", "output/percentage_increase_csv") \
+                .option("checkpointLocation", "checkpoint/percentage_increase_csv") \
+                .start()
+        else:
+            raise ValueError("Invalid output format")
 
         query.awaitTermination()
