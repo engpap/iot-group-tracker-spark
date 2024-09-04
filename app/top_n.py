@@ -13,6 +13,8 @@ from pyspark.sql.functions import to_date, col, desc, window
 from pyspark.sql.window import Window
 from pyspark.sql.functions import row_number
 from prettytable import PrettyTable
+from config import CONFIG
+import time
 
 # NOTE:
 # Sorting operations (also rank()) are supported on streaming Datasets only after an aggregation and in Complete Output Mode
@@ -24,7 +26,7 @@ class TopNationalities:
         spark = SparkSession.builder.appName("Top Nationalities").getOrCreate()
 
         # read the percentage increase data from Parquet files
-        percentage_increase_df = spark.read.parquet("output/percentage_increase")
+        percentage_increase_df = spark.read.parquet(CONFIG["output_dir"])
 
         # add a date column for partitioning
         #percentage_increase_df = percentage_increase_df.withColumn("date", to_date(col("start_time")))
@@ -65,5 +67,7 @@ class TopNationalities:
             table.add_row([row['prev_start_time'], row['prev_end_time'], row['start_time'], row['end_time'], row['nationality'], row['rank']])
 
         # store table in a file
-        with open("results/top_nationalities.txt", "w") as f:
+        filename = CONFIG["results_dir"] + "/top_nationalities_" + str(time.time())
+        with open(filename, "w") as f:
             f.write(str(table))
+        print(f"\n\n\nITTop Nationalities result successfully written to: {filename}")

@@ -6,8 +6,9 @@ import json
 from dotenv import load_dotenv
 import os
 import requests
+import csv 
 
-
+PATH_CSV = '/Users/dre/Dev/polimi/iot-group-tracker-spark/data/test/test.csv'
 # pools for generating random data
 device_id_pool = [i for i in range(1, 20)]
 nationality_pool = ["US", "CA", "UK", "IT", "FR", "DE", "ES", "JP", "KR", "CN"]
@@ -28,6 +29,12 @@ def generate_json():
         res["participants"].append(participant)
     return res
 
+def save_to_csv(data):
+    with open(PATH_CSV, mode='a', newline='') as file:
+        writer = csv.writer(file)
+        for participant in data['participants']:
+            writer.writerow([data['timestamp'], participant['device_id'], participant['nationality'], participant['age']])
+
 
 def send_data():
     server_url = os.getenv('SERVER_URL')
@@ -40,6 +47,7 @@ def send_data():
         response = requests.post(server_url, headers=headers, data=msg)
 
         if response.status_code == 200:
+            save_to_csv(data)
             print(f"Server Response: {response.json()}\n")
         else:
             print(f"Failed to send data. Status code: {response.status_code}\n")
@@ -49,4 +57,9 @@ def send_data():
 
 if __name__ == "__main__":
     load_dotenv()
+    # clear data in CSV
+    if os.path.exists(PATH_CSV):
+        os.remove(PATH_CSV)
+        print(f"CSV file {PATH_CSV} cleared.\n\n")
     send_data()
+

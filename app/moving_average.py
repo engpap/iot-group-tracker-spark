@@ -1,6 +1,8 @@
 from pyspark.sql import SparkSession
 import os
 from prettytable import PrettyTable
+from config import CONFIG
+import time
 
 
 class MovingAverage:
@@ -10,7 +12,7 @@ class MovingAverage:
             .appName("ReadParquetExample") \
             .getOrCreate()
 
-        parquet_path = "output/percentage_increase"
+        parquet_path = CONFIG["output_dir"]
 
         # list all the parquet files in the directory
         parquet_files = []
@@ -21,6 +23,7 @@ class MovingAverage:
 
         if parquet_files:
             df = spark.read.parquet(*parquet_files)
+            df = df.orderBy("prev_start_time", "start_time", "nationality")
             data = df.collect()
             
             table = PrettyTable()
@@ -29,10 +32,11 @@ class MovingAverage:
             for row in data:
                 table.add_row(row)
 
-            with open("results/queries_output.txt", "w") as f:
+            filename = CONFIG["results_dir"] + "/moving_avg_" + str(time.time())
+            with open(filename, "w") as f:
                 f.write(table.get_string())
             
-            print("Data successfully written to output/pretty_table_output.txt")
+            print(f"\n\n\nMoving average result successfully written to: {filename}")
         else:
-            print(f"No Parquet files found in directory: {parquet_path}")
+            print(f"\n\n\nNo Parquet files found in directory: {parquet_path}")
 

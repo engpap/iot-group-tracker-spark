@@ -8,7 +8,7 @@
 # python tracker.py
 
 # To run simulation:
-# python tester.py
+# python test/tester.py
 
 # Open a new terminal and run the following command:
 # nc -lk 9999
@@ -33,18 +33,15 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import explode
 from pyspark.sql.functions import split
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType
-from pyspark.sql.functions import col, window, avg, to_timestamp
-
+from pyspark.sql.functions import col, window, avg, to_timestamp, expr
 
 class Tracker:
     @staticmethod
     def run(config):
         spark = SparkSession.builder.appName("IoT Tracker Group").getOrCreate()
+        spark.sparkContext.setLogLevel("ERROR") # set log level to ERROR to avoid unnecessary logs
 
-        # set log level to ERROR to avoid unnecessary logs
-        spark.sparkContext.setLogLevel("ERROR")
-
-        #  schema of the JSON data
+        #  schema of the JSON input data
         participant_schema = StructType([
             StructField("device_id", IntegerType(), True),
             StructField("nationality", StringType(), True),
@@ -58,7 +55,7 @@ class Tracker:
         # read the JSON files as a stream
         json_stream = spark.readStream \
             .schema(json_schema) \
-            .json("/Users/dre/Dev/iot-group-tracker-spark/input_data")
+            .json(config["input_dir"])
 
         # explode the participants array to get one row per participant
         exploded_stream = json_stream.select("timestamp", explode("participants").alias("participant"))
@@ -70,24 +67,32 @@ class Tracker:
             col("participant.age").alias("age")
         )
 
-        # # Append output mode not supported when there are streaming aggregations on streaming DataFrames/DataSets without watermark;
-        # # WATERMARK tells the stream processing system how long to wait for late data before considering a window closed.
-        # # For instance, if the watermark is set to 5 minutes, the system will wait an additional 5 minutes past the end of a window 
-        # # before finalizing the computations for that window.
-        # # This allows data that arrives slightly late (up to 5 minutes late in this example) to be included in the analysis.
+        # ---- What is WATERMARK --------------------------------
+        # Append output mode not supported when there are streaming aggregations on streaming DataFrames/DataSets without watermark;
+        # WATERMARK tells the stream processing system how long to wait for late data before considering a window closed.
+        # For instance, if the watermark is set to 5 minutes, the system will wait an additional 5 minutes past the end of a window before finalizing the computations for that window.
+        # This allows data that arrives slightly late (up to 5 minutes late in this example) to be included in the analysis.
+        # --------------------------------------------------------
         processed_stream = processed_stream.withWatermark("timestamp", config["watermarkDuration"])
-        # 1. 7 days moving age average of participants for each nationality, computed for each day
-        # Sorting is not supported on streaming DataFrames/Datasets, unless it is on aggregated DataFrame/Dataset in Complete output mode; ==> NO ORDER BY
-        # Don't use alias, does not work
+
+        # GOAL: 7 days moving age average of participants for each nationality, computed for each day
+        # NOTE: Sorting is NOT supported on streaming DataFrames/Datasets, unless it is on aggregated DataFrame/Dataset in Complete output mode; ==> ORDER BY does not work!
+        # NOTE: ALIA does not work
         averaged_data = processed_stream.groupBy(
             window("timestamp", config["windowDuration"], config["slideDuration"]),
             "nationality"
-        ).avg("age") #.orderBy("window", "nationality") # sort by window and nationality for better visualization in console
+        ).avg("age")
+
+        # add a new column with window.start + slide time
+        averaged_data = averaged_data.withColumn(
+            "window_start_plus_10",
+            expr("window.start + INTERVAL 10 SECONDS")
+        )
 
         # join to calculate percentage increase without sorting
         percentage_increase = averaged_data.alias("today").join(
             averaged_data.alias("yesterday"),
-            (col("today.window.start") == col("yesterday.window.end")) & 
+            (col("today.window.start") == col("yesterday.window_start_plus_10")) & 
             (col("today.nationality") == col("yesterday.nationality"))
         )
 
@@ -109,15 +114,15 @@ class Tracker:
                 .option("truncate", False) \
                 .start()
         elif config["output_format"] == "parquet": # store files locally => use this for top_n.py
-            #  Data source parquet does not support Complete output mode => use Append
+            # NOTE: Data source parquet does not support Complete output mode ==> use Append
             query = percentage_increase.writeStream \
                 .outputMode("append") \
                 .format("parquet") \
-                .option("path", "output/percentage_increase") \
-                .option("checkpointLocation", "checkpoint/percentage_increase") \
+                .option("path", config["output_dir"]) \
+                .option("checkpointLocation", config["checkpoint_dir"]) \
                 .start()
-        # csv: not recommended
         else:
+            # NOTE: csv is not recommended
             raise ValueError("Invalid output format")
 
         query.awaitTermination()
