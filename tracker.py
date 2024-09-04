@@ -109,19 +109,14 @@ class Tracker:
                 .option("truncate", False) \
                 .start()
         elif config["output_format"] == "parquet": # store files locally => use this for top_n.py
+            #  Data source parquet does not support Complete output mode => use Append
             query = percentage_increase.writeStream \
                 .outputMode("append") \
                 .format("parquet") \
                 .option("path", "output/percentage_increase") \
                 .option("checkpointLocation", "checkpoint/percentage_increase") \
                 .start()
-        elif config["output_format"] == "csv": # not recommended
-            query = percentage_increase.writeStream \
-                .outputMode("append") \
-                .format("csv") \
-                .option("path", "output/percentage_increase_csv") \
-                .option("checkpointLocation", "checkpoint/percentage_increase_csv") \
-                .start()
+        # csv: not recommended
         else:
             raise ValueError("Invalid output format")
 

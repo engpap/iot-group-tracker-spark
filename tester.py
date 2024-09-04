@@ -44,7 +44,7 @@ def send_data():
         else:
             print(f"Failed to send data. Status code: {response.status_code}\n")
         
-        time.sleep(10) # send data every 30 seconds
+        time.sleep(30) # send data every 30 seconds
 
 
 if __name__ == "__main__":

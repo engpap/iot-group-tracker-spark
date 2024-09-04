@@ -2,7 +2,8 @@ from flask import Flask, request, jsonify
 import json
 import os
 import threading
-
+from top_n import TopNationalities
+from moving_average import MovingAverage
 
 app = Flask(__name__)
 counter = 0 
@@ -26,3 +27,13 @@ def handle_updates():
         counter += 1 
     
     return jsonify({"message": "Data received"}), 200
+
+@app.route('/top_n')
+def handle_top_n():
+    TopNationalities.run()
+    return jsonify({"message": "Top nationalities calculated"}), 200
+
+@app.route('/moving_average')
+def handle_moving_average():
+    MovingAverage.run()
+    return jsonify({"message": "Moving average calculated"}), 200

@@ -1,0 +1,7 @@
+@host = localhost:5000
+
+GET http://{{host}}/moving_average HTTP/1.1
+content-type: application/json
+    
+
+###
