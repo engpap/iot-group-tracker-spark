@@ -85,14 +85,14 @@ class Tracker:
 
         # add a new column with window.start + slide time
         averaged_data = averaged_data.withColumn(
-            "window_start_plus_10",
-            expr("window.start + INTERVAL 10 SECONDS")
+            "window_start_plus_slide",
+            expr(f"window.start + INTERVAL {config["slideDuration"]}")
         )
 
         # join to calculate percentage increase without sorting
         percentage_increase = averaged_data.alias("today").join(
             averaged_data.alias("yesterday"),
-            (col("today.window.start") == col("yesterday.window_start_plus_10")) & 
+            (col("today.window.start") == col("yesterday.window_start_plus_slide")) & 
             (col("today.nationality") == col("yesterday.nationality"))
         )
 

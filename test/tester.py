@@ -30,6 +30,7 @@ def generate_json():
     return res
 
 def save_to_csv(data):
+
     with open(PATH_CSV, mode='a', newline='') as file:
         writer = csv.writer(file)
         for participant in data['participants']:
@@ -61,5 +62,8 @@ if __name__ == "__main__":
     if os.path.exists(PATH_CSV):
         os.remove(PATH_CSV)
         print(f"CSV file {PATH_CSV} cleared.\n\n")
+    else:
+        os.makedirs(os.path.dirname(PATH_CSV), exist_ok=True)
+        print(f"Created directory for CSV file: {os.path.dirname(PATH_CSV)}\n\n")
     send_data()
 

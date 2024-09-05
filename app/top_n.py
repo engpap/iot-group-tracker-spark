@@ -28,18 +28,11 @@ class TopNationalities:
         # read the percentage increase data from Parquet files
         percentage_increase_df = spark.read.parquet(CONFIG["output_dir"])
 
-        # add a date column for partitioning
-        #percentage_increase_df = percentage_increase_df.withColumn("date", to_date(col("start_time")))
-        # # create a window specification to partition by date and order by percentage increase
-        # day_window = Window.partitionBy("date").orderBy(desc("percentage_increase"))
-        # # rank the nationalities by percentage increase within each day
-        # ranked_data = percentage_increase_df.withColumn("rank", row_number().over(day_window))
-
-        # partition by each 10-second window and order by percentage increase
-        ten_sec_window = Window.partitionBy(window(col("start_time"), "10 seconds")).orderBy(desc("percentage_increase"))
+        # partition by each slide duration (e.g. 10 seconds) and order by percentage increase
+        slided_window = Window.partitionBy(window(col("start_time"), CONFIG["slideDuration"])).orderBy(desc("percentage_increase"))
 
         # rank the nationalities by percentage increase within each 10-second window
-        ranked_data = percentage_increase_df.withColumn("rank", row_number().over(ten_sec_window))
+        ranked_data = percentage_increase_df.withColumn("rank", row_number().over(slided_window))
 
         # filter to get the top nationalities per day
         top_nationalities = ranked_data.filter(col("rank") <= 3)
@@ -58,11 +51,7 @@ class TopNationalities:
         # WORKAROUND: collect all rows and print them
         all_rows = result_df.collect()
         table = PrettyTable()
-        # |prev_start_time    |prev_end_time      |start_time         |end_time           |nationality|rank|
         table.field_names = ["prev_start_time", "prev_end_time", "start_time", "end_time", "nationality", "rank"]
-
-
-        # Add rows to the table
         for row in all_rows:
             table.add_row([row['prev_start_time'], row['prev_end_time'], row['start_time'], row['end_time'], row['nationality'], row['rank']])
 
