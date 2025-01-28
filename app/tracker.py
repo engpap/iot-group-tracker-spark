@@ -53,11 +53,22 @@ class Tracker:
         ])
 
         # read the JSON files as a stream
+        # .schema: specifies the schema Spark expects, instead of inferring it dynamically
+        # .json: tells Spark to look for JSON files in given folder -> every new file added in the folder is treated as part of the string
         json_stream = spark.readStream \
             .schema(json_schema) \
             .json(config["input_dir"])
 
-        # explode the participants array to get one row per participant
+        # before explosion, the object contains one timestmap and an array of participants.
+        # {     
+        #   "timestamp": "2024-09-04 14:51:19",
+        #   "participants": [
+        #       {"device_id": 14, "nationality": "US", "age": 13},
+        #       {"device_id": 3, "nationality": "IT", "age": 39}
+        #   ]
+        # }
+        # after the explosion, there are multiple rows, one for each participant, with the timestamp associated
+        # e.g. (timestamp, participant)
         exploded_stream = json_stream.select("timestamp", explode("participants").alias("participant"))
 
         processed_stream = exploded_stream.select(
@@ -81,7 +92,7 @@ class Tracker:
         averaged_data = processed_stream.groupBy(
             window("timestamp", config["windowDuration"], config["slideDuration"]),
             "nationality"
-        ).avg("age")
+        ).avg("age") # TODO: add cache/persist
 
         # add a new column with window.start + slide time
         averaged_data = averaged_data.withColumn(
